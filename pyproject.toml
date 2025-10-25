@@ -43,7 +43,7 @@ Repository = "https://github.com/MultiQC/multiqc-xenium-extra"
 
 [project.entry-points."multiqc.hooks.v1"]
 execution_start = "multiqc_xenium_extra.xenium_extra:xenium_extra_execution_start"
-xenium_extend = "multiqc_xenium_extra.xenium_extra:xenium_extra_extend"
+xenium_extra = "multiqc_xenium_extra.xenium_extra:extend_xenium_module"
 
 [tool.ruff]
 line-length = 120

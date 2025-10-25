@@ -14,8 +14,6 @@ from multiqc import config
 from multiqc.plots import bargraph, box, linegraph, scatter, table
 from multiqc.plots.table_object import ColumnDict, TableConfig
 from multiqc.utils import mqc_colour
-
-# Import from core xenium module - always available since core module calls this
 from multiqc.modules.xenium.xenium import GENE_CATS, categorize_feature
 
 log = logging.getLogger("multiqc")
@@ -73,26 +71,8 @@ def xenium_extra_execution_start():
         config.log_filesize_limit = 5000000000
 
 
-def xenium_extra_extend(xenium_module, data_by_sample):
-    """Custom hook called by the xenium module to extend it with extra analysis.
-
-    This hook is called during xenium module execution, before data files are written.
-    This allows the plugin to:
-    1. Parse parquet and H5 files
-    2. Add metrics to data_by_sample dict (which will be written to general stats)
-    3. Add sections to the xenium module
-
-    Args:
-        xenium_module: The MultiqcModule instance for xenium
-        data_by_sample: Dict of sample data that will be written to multiqc_xenium.yaml
-    """
-
-    # extend_xenium_module is defined later in this file
-    extend_xenium_module(xenium_module, data_by_sample)
-
-
 # Extension function and helper functions below
-def extend_xenium_module(xenium_module, data_by_sample):
+def extend_xenium_module(xenium_module):
     """
     Extend a xenium module instance with extra parquet and H5 file analysis.
 
@@ -111,7 +91,6 @@ def extend_xenium_module(xenium_module, data_by_sample):
 
     Args:
         xenium_module: Instance of the core Xenium MultiQC module
-        data_by_sample: Dict of sample data to augment with parquet/H5 metrics
     """
     log.info("Extending Xenium module with extra analysis...")
 
@@ -166,142 +145,88 @@ def extend_xenium_module(xenium_module, data_by_sample):
 
     # Merge cell area metrics into data_by_sample for general stats
     for sample_name, cell_data in cells_data_by_sample.items():
-        if sample_name in data_by_sample:
+        if sample_name in xenium_module.data_by_sample:
             # Add cell area metrics to existing sample data
             if "cell_area_median" in cell_data:
-                data_by_sample[sample_name]["cell_area_median"] = cell_data["cell_area_median"]
+                xenium_module.data_by_sample[sample_name]["cell_area_median"] = cell_data["cell_area_median"]
             if "nucleus_area_median" in cell_data:
-                data_by_sample[sample_name]["nucleus_area_median"] = cell_data["nucleus_area_median"]
+                xenium_module.data_by_sample[sample_name]["nucleus_area_median"] = cell_data["nucleus_area_median"]
             if "nucleus_to_cell_area_ratio_median" in cell_data:
-                data_by_sample[sample_name]["nucleus_to_cell_area_ratio_median"] = cell_data[
+                xenium_module.data_by_sample[sample_name]["nucleus_to_cell_area_ratio_median"] = cell_data[
                     "nucleus_to_cell_area_ratio_median"
                 ]
 
     # Use transcript count from parquet file if missing from JSON
     for sample_name, transcript_data in transcript_data_by_sample.items():
-        if sample_name in data_by_sample:
+        if sample_name in xenium_module.data_by_sample:
             # Add transcript count if missing from JSON data
             if (
-                "num_transcripts" not in data_by_sample[sample_name]
-                or data_by_sample[sample_name]["num_transcripts"] is None
+                "num_transcripts" not in xenium_module.data_by_sample[sample_name]
+                or xenium_module.data_by_sample[sample_name]["num_transcripts"] is None
             ):
                 if "total_transcripts" in transcript_data:
-                    data_by_sample[sample_name]["num_transcripts"] = transcript_data["total_transcripts"]
+                    xenium_module.data_by_sample[sample_name]["num_transcripts"] = transcript_data["total_transcripts"]
 
-    # Add cell area metrics to general stats if we have cell data
-    if cells_data_by_sample:
-        from multiqc.plots.table_object import ColumnDict
+    # Add additional cell/transcript metrics to general stats
+    # Core module already adds: num_transcripts, num_cells_detected, fraction_transcripts_assigned, median_genes_per_cell
+    # Plugin adds: fraction_transcripts_decoded_q20, cell_area_median, nucleus_area_median, nucleus_to_cell_area_ratio_median
+    if cells_data_by_sample or transcript_data_by_sample:
 
-        headers = {}
+        # Add Q20+ transcripts metric if available
+        if any("fraction_transcripts_decoded_q20" in data for data in xenium_module.data_by_sample.values()):
+            xenium_module.genstat_headers["fraction_transcripts_decoded_q20"] = ColumnDict(
+                {
+                    "title": "Q20+ Transcripts",
+                    "description": "Fraction of transcripts decoded with Q20+",
+                    "suffix": "%",
+                    "scale": "Greens",
+                    "modify": lambda x: x * 100.0,
+                    "max": 100.0,
+                    "hidden": False,
+                }
+            )
 
-        # Columns are added in order left to right
-        # Target order: Total Transcripts, Cells, Transcripts Assigned, Genes/Cell, Q20+ Transcripts, Median Cell, Median Nucleus, Nucleus/Cell
+        # Add cell area metrics if available
+        if cells_data_by_sample:
+            xenium_module.genstat_headers["cell_area_median"] = ColumnDict(
+                {
+                    "title": "Median Cell",
+                    "description": "Median cell area",
+                    "suffix": " μm²",
+                    "scale": "Blues",
+                    "format": "{:,.1f}",
+                    "shared_key": "xenium_cell_area",
+                    "hidden": False,
+                }
+            )
 
-        headers["num_transcripts"] = ColumnDict(
-            {
-                "title": "Total Transcripts",
-                "description": "Total number of transcripts detected",
-                "scale": "YlOrRd",
-                "format": "{:,.0f}",
-                "hidden": False,
-            }
-        )
+            xenium_module.genstat_headers["nucleus_area_median"] = ColumnDict(
+                {
+                    "title": "Median Nucleus",
+                    "description": "Median nucleus area",
+                    "suffix": " μm²",
+                    "scale": "Oranges",
+                    "format": "{:,.1f}",
+                    "shared_key": "xenium_cell_area",
+                    "hidden": False,
+                }
+            )
 
-        headers["num_cells_detected"] = ColumnDict(
-            {
-                "title": "Cells",
-                "description": "Number of cells detected",
-                "scale": "Blues",
-                "format": "{:,.0f}",
-                "hidden": False,
-            }
-        )
+            xenium_module.genstat_headers["nucleus_to_cell_area_ratio_median"] = ColumnDict(
+                {
+                    "title": "Nucleus/Cell",
+                    "description": "Median nucleus to cell area ratio",
+                    "scale": "Greens",
+                    "format": "{:.3f}",
+                    "max": 1.0,
+                    "hidden": False,
+                }
+            )
 
-        headers["fraction_transcripts_assigned"] = ColumnDict(
-            {
-                "title": "Transcripts Assigned",
-                "description": "Fraction of transcripts assigned to cells",
-                "suffix": "%",
-                "scale": "RdYlGn",
-                "modify": lambda x: x * 100.0,
-                "max": 100.0,
-                "hidden": False,
-            }
-        )
+    # Create plots
 
-        headers["median_genes_per_cell"] = ColumnDict(
-            {
-                "title": "Genes/Cell",
-                "description": "Median number of genes per cell",
-                "scale": "Purples",
-                "format": "{:,.0f}",
-                "hidden": False,
-            }
-        )
-
-        headers["fraction_transcripts_decoded_q20"] = ColumnDict(
-            {
-                "title": "Q20+ Transcripts",
-                "description": "Fraction of transcripts decoded with Q20+",
-                "suffix": "%",
-                "scale": "Greens",
-                "modify": lambda x: x * 100.0,
-                "max": 100.0,
-                "hidden": False,
-            }
-        )
-
-        headers["cell_area_median"] = ColumnDict(
-            {
-                "title": "Median Cell",
-                "description": "Median cell area",
-                "suffix": " μm²",
-                "scale": "Blues",
-                "format": "{:,.1f}",
-                "shared_key": "xenium_cell_area",
-                "hidden": False,
-            }
-        )
-
-        headers["nucleus_area_median"] = ColumnDict(
-            {
-                "title": "Median Nucleus",
-                "description": "Median nucleus area",
-                "suffix": " μm²",
-                "scale": "Oranges",
-                "format": "{:,.1f}",
-                "shared_key": "xenium_cell_area",
-                "hidden": False,
-            }
-        )
-
-        headers["nucleus_to_cell_area_ratio_median"] = ColumnDict(
-            {
-                "title": "Nucleus/Cell",
-                "description": "Median nucleus to cell area ratio",
-                "scale": "Greens",
-                "format": "{:.3f}",
-                "max": 1.0,
-                "hidden": False,
-            }
-        )
-
-        # Add columns to general stats
-        xenium_module.general_stats_addcols(data_by_sample, headers)
-
-    # Create plots - sections are APPENDED in the order they're added
-    # Target order:
     # 1. Segmentation Method
-    # 2. Transcript Quality Summary
-    # 3. Distribution of Transcripts
-    # 4. Cell Area Distribution
-    # 5. Fraction of Transcripts in Nucleus
-    # 6. Nucleus to Cell Area
-    # 7. Distribution of Transcripts/Genes per Cell
-    # 8. Field of View Quality
-
-    # 1. Segmentation Method (FIRST)
-    segmentation_plot = xenium_segmentation_plot(data_by_sample)
+    segmentation_plot = xenium_segmentation_plot(xenium_module.data_by_sample)
     if segmentation_plot:
         xenium_module.add_section(
             name="Segmentation Method",
@@ -578,7 +503,7 @@ def extend_xenium_module(xenium_module, data_by_sample):
             )
 
     if transcript_data_by_sample:
-        # 8. Field of View Quality (LAST)
+        # 8. Field of View Quality
         fov_plot = xenium_fov_quality_plot(transcript_data_by_sample)
         if fov_plot:
             xenium_module.add_section(
@@ -1341,23 +1266,23 @@ def xenium_fov_quality_plot(transcript_data_by_sample):
     cats = {
         "Excellent (QV ≥ 35)": {
             "name": "Excellent (QV ≥ 35)",
-            "color": "#32CD32",  # Bright green for excellent quality
+            "color": "rgba(0, 216, 0, 0.71)",  # Bright green for excellent quality
         },
         "Good (QV 30-35)": {
             "name": "Good (QV 30-35)",
-            "color": "#90EE90",  # Light green for good quality
+            "color": "rgba(98, 196, 98, 0.52)",  # Light green for good quality
         },
         "Fair (QV 25-30)": {
             "name": "Fair (QV 25-30)",
-            "color": "#FFB6C1",  # Light pink for fair quality
+            "color": "rgba(177, 111, 119, 0.55)",  # Light pink for fair quality
         },
         "Poor (QV 20-25)": {
             "name": "Poor (QV 20-25)",
-            "color": "#FF8C94",  # Medium pink-red for poor quality
+            "color": "rgba(176, 37, 46, 0.64)",  # Medium pink-red for poor quality
         },
         "Low (QV < 20)": {
             "name": "Low (QV < 20)",
-            "color": "#DC143C",  # Dark red for low quality
+            "color": "rgba(255, 0, 51, 0.67)",  # Dark red for low quality
         },
     }
 
