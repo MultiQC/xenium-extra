@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multiqc_xenium_extra"
+version = "0.1.0"
+authors = [
+    {name = "Phil Ewels", email = "phil.ewels@seqera.io"},
+]
+description = "MultiQC plugin for extra Xenium spatial transcriptomics analysis"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["bioinformatics", "biology", "spatial transcriptomics", "xenium", "quality control"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "multiqc>=1.20",
+    "polars>=0.18.0",
+    "scipy>=1.8.0",
+    "scanpy>=1.9.0",
+]
+
+[tool.setuptools]
+packages = ["multiqc_xenium_extra"]
+
+[project.urls]
+Repository = "https://github.com/MultiQC/multiqc-xenium-extra"
+
+[project.entry-points."multiqc.hooks.v1"]
+execution_start = "multiqc_xenium_extra.xenium_extra:xenium_extra_execution_start"
+xenium_extend = "multiqc_xenium_extra.xenium_extra:xenium_extra_extend"
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
