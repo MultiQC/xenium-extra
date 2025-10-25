@@ -19,7 +19,6 @@ from multiqc.modules.xenium.xenium import GENE_CATS, categorize_feature
 log = logging.getLogger("multiqc")
 
 
-
 def xenium_extra_execution_start():
     """Code to execute after config files and command line flags have been parsed.
 
@@ -35,34 +34,13 @@ def xenium_extra_execution_start():
     # Note: shared=True allows multiple modules to access these files
     # Note: We don't check contents since these are binary files
     if "xenium/transcripts" not in config.sp:
-        config.update_dict(
-            config.sp,
-            {
-                "xenium/transcripts": {
-                    "fn": "transcripts.parquet"
-                }
-            }
-        )
+        config.update_dict(config.sp, {"xenium/transcripts": {"fn": "transcripts.parquet"}})
 
     if "xenium/cells" not in config.sp:
-        config.update_dict(
-            config.sp,
-            {
-                "xenium/cells": {
-                    "fn": "cells.parquet"
-                }
-            }
-        )
+        config.update_dict(config.sp, {"xenium/cells": {"fn": "cells.parquet"}})
 
     if "xenium/cell_feature_matrix" not in config.sp:
-        config.update_dict(
-            config.sp,
-            {
-                "xenium/cell_feature_matrix": {
-                    "fn": "cell_feature_matrix.h5"
-                }
-            }
-        )
+        config.update_dict(config.sp, {"xenium/cell_feature_matrix": {"fn": "cell_feature_matrix.h5"}})
 
     # Increase file size limit to handle large Xenium files (if not already set by user)
     # Default is 50MB, Xenium files can be several GB
@@ -171,7 +149,6 @@ def extend_xenium_module(xenium_module):
     # Core module already adds: num_transcripts, num_cells_detected, fraction_transcripts_assigned, median_genes_per_cell
     # Plugin adds: fraction_transcripts_decoded_q20, cell_area_median, nucleus_area_median, nucleus_to_cell_area_ratio_median
     if cells_data_by_sample or transcript_data_by_sample:
-
         # Add Q20+ transcripts metric if available
         if any("fraction_transcripts_decoded_q20" in data for data in xenium_module.data_by_sample.values()):
             xenium_module.genstat_headers["fraction_transcripts_decoded_q20"] = ColumnDict(
@@ -798,9 +775,7 @@ def parse_cells_parquet(f) -> Optional[Dict]:
         # Nucleus to cell area ratio (only for non-null values)
         ratio_stats = (
             lazy_df.filter(
-                (pl.col("cell_area").is_not_null())
-                & (pl.col("nucleus_area").is_not_null())
-                & (pl.col("cell_area") > 0)
+                (pl.col("cell_area").is_not_null()) & (pl.col("nucleus_area").is_not_null()) & (pl.col("cell_area") > 0)
             )
             .with_columns((pl.col("nucleus_area") / pl.col("cell_area")).alias("ratio"))
             .select(
@@ -1355,9 +1330,7 @@ def xenium_transcripts_per_gene_plot(transcript_data_by_sample):
         sample_data = transcript_data_by_sample[s_name]
         # Create single-item threshold dict for consistency
         single_sample_thresholds = {s_name: n_mols_threshold}
-        return _create_single_sample_molecules_plot(
-            sample_data, bins, bin_centers, single_sample_thresholds, s_name
-        )
+        return _create_single_sample_molecules_plot(sample_data, bins, bin_centers, single_sample_thresholds, s_name)
     else:
         # Multi-sample with per-sample thresholds
         return _create_multi_sample_molecules_plot(
@@ -1705,7 +1678,6 @@ def _create_single_sample_combined_density(samples_with_transcript_counts, sampl
         raw_transcript_values = transcript_values
         transcript_values = np.array(transcript_values)
 
-
         kde = stats.gaussian_kde(transcript_values)
         x_min, x_max = transcript_values.min(), transcript_values.max()
         x_range = np.linspace(x_min, x_max, 1000)
@@ -1743,7 +1715,6 @@ def _create_single_sample_combined_density(samples_with_transcript_counts, sampl
         for x, y in zip(x_range, density):
             genes_data[float(x)] = float(y)
         plot_data["Detected genes per cell"] = genes_data
-
 
     if not plot_data:
         return None
@@ -1830,9 +1801,7 @@ def _create_single_sample_area_density(cell_data):
 
     # Skip density plots if only pre-calculated statistics are available
     if "cell_area_values" not in cell_data:
-        log.info(
-            "Skipping cell area density plot - using pre-calculated statistics. Density plots require raw data."
-        )
+        log.info("Skipping cell area density plot - using pre-calculated statistics. Density plots require raw data.")
         return None
 
     cell_areas = cell_data["cell_area_values"]

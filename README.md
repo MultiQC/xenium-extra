@@ -29,7 +29,7 @@ pip install multiqc-xenium-extra
 The plugin automatically adjusts the file size limit to handle large Xenium files:
 
 ```yaml
-log_filesize_limit: 5000000000  # 5GB
+log_filesize_limit: 5000000000 # 5GB
 ```
 
 ## Usage
