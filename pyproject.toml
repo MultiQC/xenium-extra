@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multiqc_xenium_extra"
-version = "0.1.0"
+version = "1.0.0"
 authors = [
     {name = "Phil Ewels", email = "phil.ewels@seqera.io"},
 ]
@@ -29,7 +29,7 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "multiqc>=1.20",
+    "multiqc>=1.32",
     "polars>=0.18.0",
     "scipy>=1.8.0",
     "scanpy>=1.9.0",
