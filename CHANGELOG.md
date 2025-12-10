@@ -1,5 +1,9 @@
 # multiqc-xenium-extra changelog
 
+## v1.0.2 [2025-12-10]
+
+Increase file size limit from 5GB to 50GB to handle larger Xenium files.
+
 ## v1.0.1 [2025-10-25]
 
 Move over some additional code from core MultiQC that
