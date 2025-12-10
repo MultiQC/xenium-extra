@@ -32,7 +32,7 @@ multiqc /path/to/xenium/data
 
 The plugin uses MultiQC's hook system (v1) to extend functionality:
 
-- **`xenium_extra_execution_start`**: Called at startup to register search patterns for `transcripts.parquet`, `cells.parquet`, and `cell_feature_matrix.h5` files, and increase file size limit to 5GB.
+- **`xenium_extra_execution_start`**: Called at startup to register search patterns for `transcripts.parquet`, `cells.parquet`, and `cell_feature_matrix.h5` files, and increase file size limit to 50GB.
 
 - **`extend_xenium_module`**: Called after the core Xenium module runs, receives the module instance and adds extra sections/data.
 

@@ -76,9 +76,9 @@ def xenium_extra_execution_start():
 
     # Increase file size limit to handle large Xenium files (if not already set by user)
     # Default is 50MB, Xenium files can be several GB
-    if config.log_filesize_limit < 5000000000:  # 5GB
-        log.debug("Increasing log_filesize_limit to 5GB for Xenium parquet files")
-        config.log_filesize_limit = 5000000000
+    if config.log_filesize_limit < 50000000000:  # 50GB
+        log.debug("Increasing log_filesize_limit to 50GB for Xenium parquet files")
+        config.log_filesize_limit = 50000000000
 
 
 # Extension function and helper functions below
