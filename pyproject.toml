@@ -39,7 +39,10 @@ dependencies = [
 packages = ["multiqc_xenium_extra"]
 
 [project.urls]
-Repository = "https://github.com/MultiQC/multiqc-xenium-extra"
+Repository = "https://github.com/MultiQC/xenium-extra"
+Documentation = "https://docs.seqera.io/multiqc/modules/xenium"
+Issues = "https://github.com/MultiQC/xenium-extra/issues"
+Changelog = "https://github.com/MultiQC/xenium-extra/blob/main/CHANGELOG.md"
 
 [project.entry-points."multiqc.hooks.v1"]
 execution_start = "multiqc_xenium_extra.xenium_extra:xenium_extra_execution_start"
