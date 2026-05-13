@@ -165,6 +165,10 @@ def extend_xenium_module(xenium_module):
                 xenium_module.data_by_sample[sample_name]["nucleus_to_cell_area_ratio_median"] = cell_data[
                     "nucleus_to_cell_area_ratio_median"
                 ]
+            if "nuclei_0_frac" in cell_data:
+                xenium_module.data_by_sample[sample_name]["nuclei_0_frac"] = cell_data["nuclei_0_frac"]
+            if "nuclei_multi_frac" in cell_data:
+                xenium_module.data_by_sample[sample_name]["nuclei_multi_frac"] = cell_data["nuclei_multi_frac"]
 
     # Use transcript count from parquet file if missing from JSON
     for sample_name, transcript_data in transcript_data_by_sample.items():
@@ -231,6 +235,34 @@ def extend_xenium_module(xenium_module):
                     "hidden": False,
                 }
             )
+
+            if any("nuclei_0_frac" in data for data in xenium_module.data_by_sample.values()):
+                xenium_module.genstat_headers["nuclei_0_frac"] = ColumnDict(
+                    {
+                        "title": "% 0-Nuclei Cells",
+                        "description": "Fraction of cells with no detected nucleus (segmentation QC)",
+                        "suffix": "%",
+                        "scale": "Reds",
+                        "modify": lambda x: x * 100.0,
+                        "max": 100.0,
+                        "format": "{:,.2f}",
+                        "hidden": True,
+                    }
+                )
+
+            if any("nuclei_multi_frac" in data for data in xenium_module.data_by_sample.values()):
+                xenium_module.genstat_headers["nuclei_multi_frac"] = ColumnDict(
+                    {
+                        "title": "% Multi-Nuclei Cells",
+                        "description": "Fraction of cells with 2+ detected nuclei",
+                        "suffix": "%",
+                        "scale": "Purples",
+                        "modify": lambda x: x * 100.0,
+                        "max": 100.0,
+                        "format": "{:,.2f}",
+                        "hidden": True,
+                    }
+                )
 
     # Create plots
 
@@ -380,7 +412,7 @@ def extend_xenium_module(xenium_module):
             )
 
         # 5. Fraction of Transcripts in Nucleus
-        nucleus_rna_plot = xenium_nucleus_rna_fraction_plot(cells_data_by_sample)
+        nucleus_rna_plot = xenium_nucleus_rna_fraction_plot(transcript_data_by_sample)
         if nucleus_rna_plot:
             xenium_module.add_section(
                 name="Fraction of Transcripts in Nucleus",
@@ -558,6 +590,39 @@ def extend_xenium_module(xenium_module):
                 plot=fov_plot,
             )
 
+    if cells_data_by_sample:
+        # 9. Nuclei per Cell
+        nuclei_plot = xenium_nuclei_per_cell_plot(cells_data_by_sample)
+        if nuclei_plot:
+            xenium_module.add_section(
+                name="Nuclei per Cell",
+                anchor="xenium-nuclei-per-cell",
+                description="Distribution of cells by number of segmented nuclei per cell (0 / 1 / 2+)",
+                helptext="""
+                This stacked bar shows the per-sample distribution of cells grouped by the number of
+                segmented nuclei per cell.
+
+                **Categories:**
+
+                * **0 nuclei**: Cells with no detected nucleus. Often indicates under-segmentation,
+                  boundary-stain failure, or genuinely anucleate fragments.
+                * **1 nucleus**: The expected majority for most tissues.
+                * **2+ nuclei**: Multi-nucleated cells. May reflect merge errors during segmentation,
+                  or genuine biology in tissues like skeletal/cardiac muscle.
+
+                **What to look for:**
+
+                * **High 0-nucleus fraction**: Segmentation problem — check DAPI channel and boundary
+                  stain inputs.
+                * **Elevated multi-nucleus fraction**: Expected for muscle/heart tissue;
+                  unexpected elsewhere may suggest cell-merge artifacts.
+
+                Note: 0-nucleus rates can be inflated in samples dominated by very-low-transcript-count
+                "cells" (debris, fragments); interpret alongside the transcripts-per-cell distribution.
+                """,
+                plot=nuclei_plot,
+            )
+
 
 def xenium_segmentation_plot(data_by_sample):
     """Create stacked bar chart showing cell segmentation methods"""
@@ -577,6 +642,31 @@ def xenium_segmentation_plot(data_by_sample):
     }
 
     return bargraph.plot(data_by_sample, keys, plot_config)
+
+
+def xenium_nuclei_per_cell_plot(cells_data_by_sample):
+    """Create stacked bar chart showing distribution of nuclei per cell (0 / 1 / 2+)"""
+    keys = {
+        "nuclei_0_frac": {"name": "0 nuclei", "color": "#d62728"},
+        "nuclei_1_frac": {"name": "1 nucleus", "color": "#2ca02c"},
+        "nuclei_multi_frac": {"name": "2+ nuclei", "color": "#1f77b4"},
+    }
+
+    relevant = {s_name: {k: data[k] for k in keys if k in data} for s_name, data in cells_data_by_sample.items()}
+    relevant = {s_name: d for s_name, d in relevant.items() if d}
+    if not relevant:
+        return None
+
+    plot_config = {
+        "id": "xenium_nuclei_per_cell",
+        "title": "Xenium: Nuclei per Cell",
+        "ylab": "Fraction of cells",
+        "stacking": "normal",
+        "ymax": 1.0,
+        "cpswitch": False,
+    }
+
+    return bargraph.plot(relevant, keys, plot_config)
 
 
 def parse_transcripts_parquet(f) -> Optional[Dict]:
@@ -715,6 +805,47 @@ def parse_transcripts_parquet(f) -> Optional[Dict]:
         result["fov_quality_stats"] = fov_quality_stats
         result["fov_median_qualities"] = fov_medians  # For heatmap generation
 
+    # Per-cell fraction of transcripts inside the nucleus, derived from the
+    # per-transcript `overlaps_nucleus` flag. Both numerator and denominator
+    # come from the same scan so the fraction is bounded in [0, 1].
+    if "overlaps_nucleus" in schema and "cell_id" in schema:
+        # `overlaps_nucleus` is uint8 on current Xenium output and bool on
+        # older ones; cast to Int64 to handle both.
+        # Drop the "UNASSIGNED" sentinel — transcripts not attributable to
+        # any cell, otherwise they aggregate into a fake "cell" row.
+        per_cell_nuc = (
+            df_lazy.filter(pl.col("cell_id") != "UNASSIGNED")
+            .group_by("cell_id")
+            .agg(
+                [
+                    pl.col("overlaps_nucleus").sum().cast(pl.Int64).alias("n_nuc"),
+                    pl.len().alias("n_tx"),
+                ]
+            )
+            .with_columns((pl.col("n_nuc") / pl.col("n_tx")).alias("fraction"))
+            .collect()
+        )
+
+        if not per_cell_nuc.is_empty():
+            frac = per_cell_nuc["fraction"]
+            result["nucleus_rna_fraction_values"] = frac.to_list()
+            result["nucleus_rna_fraction_mean"] = float(frac.mean())
+            result["nucleus_rna_fraction_median"] = float(frac.median())
+            result["nucleus_rna_fraction_box_stats"] = {
+                "min": float(frac.min()),
+                "q1": float(frac.quantile(0.25)),
+                "median": float(frac.median()),
+                "q3": float(frac.quantile(0.75)),
+                "max": float(frac.max()),
+                "mean": float(frac.mean()),
+                "count": int(len(frac)),
+            }
+    elif "cell_id" in schema:
+        log.info(
+            f"{f['fn']} missing 'overlaps_nucleus' column - "
+            "'Fraction of Transcripts in Nucleus' section will be skipped for this sample."
+        )
+
     return result
 
 
@@ -780,6 +911,10 @@ def parse_cells_parquet(f) -> Optional[Dict]:
             "mean": cell_area_stats["mean"].item(),
             "count": cell_area_stats["count"].item(),
         }
+
+        # Raw per-cell values for the single-sample density helper.
+        cell_area_values = lazy_df.filter(pl.col("cell_area").is_not_null()).select(pl.col("cell_area")).collect()
+        cell_stats["cell_area_values"] = cell_area_values["cell_area"].to_list()
 
     # Nucleus area distribution stats using lazy operations
     nucleus_area_stats = (
@@ -861,6 +996,19 @@ def parse_cells_parquet(f) -> Optional[Dict]:
                     "count": ratio_dist_stats["count"].item(),
                 }
 
+                # Raw per-cell values for the single-sample density helper.
+                ratio_values = (
+                    lazy_df.filter(
+                        (pl.col("cell_area").is_not_null())
+                        & (pl.col("nucleus_area").is_not_null())
+                        & (pl.col("cell_area") > 0)
+                    )
+                    .with_columns((pl.col("nucleus_area") / pl.col("cell_area")).alias("ratio"))
+                    .select(pl.col("ratio"))
+                    .collect()
+                )
+                cell_stats["nucleus_to_cell_area_ratio_values"] = ratio_values["ratio"].to_list()
+
     # Store total transcript counts per cell (total_counts) for distribution plots
     total_count_check = (
         lazy_df.filter(pl.col("total_counts").is_not_null())
@@ -894,6 +1042,12 @@ def parse_cells_parquet(f) -> Optional[Dict]:
             "mean": total_counts_stats["mean"].item(),
             "count": total_counts_stats["count"].item(),
         }
+
+        # Raw per-cell values for the single-sample density helper.
+        total_counts_values = (
+            lazy_df.filter(pl.col("total_counts").is_not_null()).select(pl.col("total_counts")).collect()
+        )
+        cell_stats["total_counts_values"] = total_counts_values["total_counts"].to_list()
 
     # Store detected genes per cell (transcript_counts) for distribution plots
     # NOTE: This will be overridden by H5-based calculation if cell_feature_matrix.h5 is available
@@ -930,55 +1084,30 @@ def parse_cells_parquet(f) -> Optional[Dict]:
             "count": gene_counts_stats["count"].item(),
         }
 
-    # Add nucleus RNA fraction if nucleus_count is available
+    # Distribution of segmented nuclei per cell (0 / 1 / 2+)
     if "nucleus_count" in schema:
-        nucleus_fraction_stats = (
-            lazy_df.filter(pl.col("total_counts") >= 10)
-            .with_columns((pl.col("nucleus_count") / pl.col("total_counts")).alias("fraction"))
+        nuclei_bins = (
+            lazy_df.filter(pl.col("nucleus_count").is_not_null())
             .select(
                 [
-                    pl.col("fraction").mean().alias("mean"),
-                    pl.col("fraction").median().alias("median"),
-                    pl.col("fraction").count().alias("count"),
+                    (pl.col("nucleus_count") == 0).sum().alias("n_0"),
+                    (pl.col("nucleus_count") == 1).sum().alias("n_1"),
+                    (pl.col("nucleus_count") >= 2).sum().alias("n_multi"),
+                    pl.col("nucleus_count").count().alias("n_total"),
                 ]
             )
             .collect()
         )
 
-        if nucleus_fraction_stats["count"].item() > 0:
+        n_total = nuclei_bins["n_total"].item()
+        if n_total > 0:
             cell_stats.update(
                 {
-                    "nucleus_rna_fraction_mean": nucleus_fraction_stats["mean"].item(),
-                    "nucleus_rna_fraction_median": nucleus_fraction_stats["median"].item(),
+                    "nuclei_0_frac": nuclei_bins["n_0"].item() / n_total,
+                    "nuclei_1_frac": nuclei_bins["n_1"].item() / n_total,
+                    "nuclei_multi_frac": nuclei_bins["n_multi"].item() / n_total,
                 }
             )
-
-            # Calculate nucleus RNA fraction distribution statistics for box plots
-            nucleus_fraction_dist_stats = (
-                lazy_df.filter(pl.col("total_counts") > 0)
-                .with_columns((pl.col("nucleus_count") / pl.col("total_counts")).alias("fraction"))
-                .select(
-                    [
-                        pl.col("fraction").min().alias("min"),
-                        pl.col("fraction").quantile(0.25).alias("q1"),
-                        pl.col("fraction").median().alias("median"),
-                        pl.col("fraction").quantile(0.75).alias("q3"),
-                        pl.col("fraction").max().alias("max"),
-                        pl.col("fraction").mean().alias("mean"),
-                        pl.col("fraction").count().alias("count"),
-                    ]
-                )
-                .collect()
-            )
-            cell_stats["nucleus_rna_fraction_box_stats"] = {
-                "min": nucleus_fraction_dist_stats["min"].item(),
-                "q1": nucleus_fraction_dist_stats["q1"].item(),
-                "median": nucleus_fraction_dist_stats["median"].item(),
-                "q3": nucleus_fraction_dist_stats["q3"].item(),
-                "max": nucleus_fraction_dist_stats["max"].item(),
-                "mean": nucleus_fraction_dist_stats["mean"].item(),
-                "count": nucleus_fraction_dist_stats["count"].item(),
-            }
 
     return cell_stats
 
@@ -1665,16 +1794,18 @@ def xenium_cell_distributions_combined_plot(cells_data_by_sample):
     samples_with_gene_counts = {}
 
     for s_name, data in cells_data_by_sample.items():
-        # Check for pre-calculated statistics first, fall back to raw values
-        if data and "total_counts_box_stats" in data:
-            samples_with_transcript_counts[s_name] = data["total_counts_box_stats"]
-        elif data and "total_counts_values" in data and data["total_counts_values"]:
+        # Prefer raw values when available so the single-sample density path
+        # can run; fall back to pre-computed box stats otherwise. Multi-sample
+        # `box.plot()` handles either shape.
+        if data and "total_counts_values" in data and data["total_counts_values"]:
             samples_with_transcript_counts[s_name] = data["total_counts_values"]
+        elif data and "total_counts_box_stats" in data:
+            samples_with_transcript_counts[s_name] = data["total_counts_box_stats"]
 
-        if data and "detected_genes_stats" in data:
-            samples_with_gene_counts[s_name] = data["detected_genes_stats"]
-        elif data and "detected_genes_values" in data and data["detected_genes_values"]:
+        if data and "detected_genes_values" in data and data["detected_genes_values"]:
             samples_with_gene_counts[s_name] = data["detected_genes_values"]
+        elif data and "detected_genes_stats" in data:
+            samples_with_gene_counts[s_name] = data["detected_genes_stats"]
 
     # If neither dataset is available, return None
     if not samples_with_transcript_counts and not samples_with_gene_counts:
