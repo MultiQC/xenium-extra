@@ -912,6 +912,10 @@ def parse_cells_parquet(f) -> Optional[Dict]:
             "count": cell_area_stats["count"].item(),
         }
 
+        # Raw per-cell values for the single-sample density helper.
+        cell_area_values = lazy_df.filter(pl.col("cell_area").is_not_null()).select(pl.col("cell_area")).collect()
+        cell_stats["cell_area_values"] = cell_area_values["cell_area"].to_list()
+
     # Nucleus area distribution stats using lazy operations
     nucleus_area_stats = (
         lazy_df.filter(pl.col("nucleus_area").is_not_null())
@@ -992,6 +996,19 @@ def parse_cells_parquet(f) -> Optional[Dict]:
                     "count": ratio_dist_stats["count"].item(),
                 }
 
+                # Raw per-cell values for the single-sample density helper.
+                ratio_values = (
+                    lazy_df.filter(
+                        (pl.col("cell_area").is_not_null())
+                        & (pl.col("nucleus_area").is_not_null())
+                        & (pl.col("cell_area") > 0)
+                    )
+                    .with_columns((pl.col("nucleus_area") / pl.col("cell_area")).alias("ratio"))
+                    .select(pl.col("ratio"))
+                    .collect()
+                )
+                cell_stats["nucleus_to_cell_area_ratio_values"] = ratio_values["ratio"].to_list()
+
     # Store total transcript counts per cell (total_counts) for distribution plots
     total_count_check = (
         lazy_df.filter(pl.col("total_counts").is_not_null())
@@ -1025,6 +1042,12 @@ def parse_cells_parquet(f) -> Optional[Dict]:
             "mean": total_counts_stats["mean"].item(),
             "count": total_counts_stats["count"].item(),
         }
+
+        # Raw per-cell values for the single-sample density helper.
+        total_counts_values = (
+            lazy_df.filter(pl.col("total_counts").is_not_null()).select(pl.col("total_counts")).collect()
+        )
+        cell_stats["total_counts_values"] = total_counts_values["total_counts"].to_list()
 
     # Store detected genes per cell (transcript_counts) for distribution plots
     # NOTE: This will be overridden by H5-based calculation if cell_feature_matrix.h5 is available
@@ -1771,16 +1794,18 @@ def xenium_cell_distributions_combined_plot(cells_data_by_sample):
     samples_with_gene_counts = {}
 
     for s_name, data in cells_data_by_sample.items():
-        # Check for pre-calculated statistics first, fall back to raw values
-        if data and "total_counts_box_stats" in data:
-            samples_with_transcript_counts[s_name] = data["total_counts_box_stats"]
-        elif data and "total_counts_values" in data and data["total_counts_values"]:
+        # Prefer raw values when available so the single-sample density path
+        # can run; fall back to pre-computed box stats otherwise. Multi-sample
+        # `box.plot()` handles either shape.
+        if data and "total_counts_values" in data and data["total_counts_values"]:
             samples_with_transcript_counts[s_name] = data["total_counts_values"]
+        elif data and "total_counts_box_stats" in data:
+            samples_with_transcript_counts[s_name] = data["total_counts_box_stats"]
 
-        if data and "detected_genes_stats" in data:
-            samples_with_gene_counts[s_name] = data["detected_genes_stats"]
-        elif data and "detected_genes_values" in data and data["detected_genes_values"]:
+        if data and "detected_genes_values" in data and data["detected_genes_values"]:
             samples_with_gene_counts[s_name] = data["detected_genes_values"]
+        elif data and "detected_genes_stats" in data:
+            samples_with_gene_counts[s_name] = data["detected_genes_stats"]
 
     # If neither dataset is available, return None
     if not samples_with_transcript_counts and not samples_with_gene_counts:
